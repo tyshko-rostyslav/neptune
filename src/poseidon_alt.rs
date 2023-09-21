@@ -37,6 +37,33 @@ where
     p.elements[1]
 }
 
+/// The returned element is the second poseidon element, the first is the arity tag.
+pub fn hash_correct_multiple<F, A>(p: &mut Poseidon<'_, F, A>, output_size: usize) -> Vec<F>
+where
+    F: PrimeField,
+    A: Arity<F>,
+{
+    // This counter is incremented when a round constants is read. Therefore, the round constants never repeat.
+    // The first full round should use the initial constants.
+    full_round(p);
+
+    for _ in 1..p.constants.half_full_rounds {
+        full_round(p);
+    }
+
+    partial_round(p);
+
+    for _ in 1..p.constants.partial_rounds {
+        partial_round(p);
+    }
+
+    for _ in 0..p.constants.half_full_rounds {
+        full_round(p);
+    }
+
+    p.elements[1..(output_size + 1)].to_vec()
+}
+
 pub fn full_round<F, A>(p: &mut Poseidon<'_, F, A>)
 where
     F: PrimeField,
