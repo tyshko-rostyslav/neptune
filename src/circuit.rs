@@ -191,6 +191,39 @@ where
         self.elements[1].ensure_allocated(&mut cs.namespace(|| "hash result"), true)
     }
 
+    fn hash_multiple<CS: ConstraintSystem<Scalar>>(
+        &mut self,
+        mut cs: CS,
+        output_size: usize,
+    ) -> Result<Vec<AllocatedNum<Scalar>>, SynthesisError> {
+        self.full_round(cs.namespace(|| "first round"), true, false)?;
+
+        for i in 1..self.constants.full_rounds / 2 {
+            self.full_round(
+                cs.namespace(|| format!("initial full round {i}")),
+                false,
+                false,
+            )?;
+        }
+
+        for i in 0..self.constants.partial_rounds {
+            self.partial_round(cs.namespace(|| format!("partial round {i}")))?;
+        }
+
+        for i in 0..(self.constants.full_rounds / 2) - 1 {
+            self.full_round(
+                cs.namespace(|| format!("final full round {i}")),
+                false,
+                false,
+            )?;
+        }
+        self.full_round(cs.namespace(|| "terminal full round"), false, true)?;
+
+        let res: Vec<_> = (1..(output_size + 1)).map(|i| self.elements[i].ensure_allocated(&mut cs.namespace(|| "hash result"), true)).collect::<Result<Vec<_>, SynthesisError>>()?;
+
+        Ok(res)
+    }
+
     fn full_round<CS: ConstraintSystem<Scalar>>(
         &mut self,
         mut cs: CS,
@@ -382,6 +415,33 @@ where
     let mut p = PoseidonCircuit::new(elements, constants);
 
     p.hash(cs)
+}
+
+/// Create legacy circuit for Poseidon hash. If possible, prefer the equivalent 'optimal' alternatives.
+pub fn poseidon_hash_multiple<CS, Scalar, A>(
+    cs: CS,
+    preimage: Vec<AllocatedNum<Scalar>>,
+    constants: &PoseidonConstants<Scalar, A>,
+    output_size: usize,
+) -> Result<Vec<AllocatedNum<Scalar>>, SynthesisError>
+where
+    CS: ConstraintSystem<Scalar>,
+    Scalar: PrimeField,
+    A: Arity<Scalar>,
+{
+    let arity = A::to_usize();
+    let tag_element = Elt::num_from_fr::<CS>(constants.domain_tag);
+    let mut elements = Vec::with_capacity(arity + 1);
+    elements.push(tag_element);
+    elements.extend(preimage.into_iter().map(Elt::Allocated));
+
+    if let HashType::ConstantLength(length) = constants.hash_type {
+        assert!(length == arity, "Length must be equal to arity since no padding is provided. Check circuit2.rs for optimized and complete implementation");
+    }
+
+    let mut p = PoseidonCircuit::new(elements, constants);
+
+    p.hash_multiple(cs, output_size)
 }
 
 /// Compute l^5 and enforce constraint. If round_key is supplied, add it to result.
